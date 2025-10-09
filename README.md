@@ -1,4 +1,4 @@
-# HTTP TEE
+# HTTP Enclave
 
 End to end encrypted communication between clients and an isolated enclave. The infrastructure operator cannot read the traffic.
 
