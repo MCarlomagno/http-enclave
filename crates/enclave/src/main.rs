@@ -29,8 +29,8 @@ fn load_enclave_state(enclave_key_base64: &str) -> anyhow::Result<EnclaveState> 
 
 async fn load_tls_config() -> anyhow::Result<axum_server::tls_rustls::RustlsConfig> {
     // Load TLS certificate and key from files or environment
-    let cert_path = std::env::var("TLS_CERT_PATH").unwrap_or_else(|_| "cert.pem".into());
-    let key_path = std::env::var("TLS_KEY_PATH").unwrap_or_else(|_| "key.pem".into());
+    let cert_path = std::env::var("TLS_CERT_PATH").unwrap_or_else(|_| "../cert.pem".into());
+    let key_path = std::env::var("TLS_KEY_PATH").unwrap_or_else(|_| "../key.pem".into());
 
     let config =
         axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert_path, &key_path).await?;
@@ -40,7 +40,7 @@ async fn load_tls_config() -> anyhow::Result<axum_server::tls_rustls::RustlsConf
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let enclave_key_base64 = std::env::var("ENCLAVE_KEY_BASE64").unwrap();
+    let enclave_key_base64 = std::env::var("ENCLAVE_KEY_BASE64").unwrap_or_else(|_| "cg5DpFeQeQUpNyEuasPiFVO7eeeO9Xua4/TJjiNtJBg=".into());
     let state = load_enclave_state(&enclave_key_base64)?; // holds AES/KMS client, etc.
     let app = Router::new()
         .route("/private-data", post(post_private))

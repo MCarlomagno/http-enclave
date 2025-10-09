@@ -49,17 +49,21 @@ Generate TLS certificate:
 openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -nodes -subj "/CN=localhost"
 ```
 
+Setup environment variables:
+
+Copy the contents of env.example into .env and update the values.
+```bash
+cp env.example .env
+```
+
 Run enclave:
 ```bash
-export TLS_CERT_PATH=cert.pem
-export TLS_KEY_PATH=key.pem
-export USE_TLS=true
-cd crates/enclave && cargo run
+cargo run --bin enclave
 ```
 
 Run host proxy:
 ```bash
-cd crates/host && cargo run
+cargo run --bin host
 ```
 
 Test:
