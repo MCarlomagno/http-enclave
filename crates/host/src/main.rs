@@ -8,8 +8,12 @@ use vsock::VsockStream;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let listen = std::env::var("BIND_ADDR").unwrap_or("0.0.0.0:443".into());
-    let _enclave_cid: u32 = std::env::var("ENCLAVE_CID")?.parse()?;
-    let _enclave_port: u32 = std::env::var("ENCLAVE_PORT")?.parse()?;
+
+    #[cfg(feature = "vsock")]
+    let enclave_cid: u32 = std::env::var("ENCLAVE_CID")?.parse()?;
+    #[cfg(feature = "vsock")]
+    let enclave_port: u32 = std::env::var("ENCLAVE_PORT")?.parse()?;
+
     let ln = TcpListener::bind(&listen).await?;
     println!("host proxy on {}", listen);
 
