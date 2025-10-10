@@ -42,7 +42,7 @@ async fn load_tls_config() -> anyhow::Result<axum_server::tls_rustls::RustlsConf
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let enclave_key_base64 = std::env::var("ENCLAVE_KEY_BASE64").unwrap_or_else(|_| "***REMOVED***".into());
+    let enclave_key_base64 = "***REMOVED***";
     let state = load_enclave_state(&enclave_key_base64)?; // holds AES/KMS client, etc.
     let app = Router::new()
         .route("/private-data", post(post_private))
