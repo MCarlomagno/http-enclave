@@ -8,6 +8,8 @@ use axum::{
 };
 use base64::prelude::*;
 use tokio::net::TcpListener;
+#[cfg(feature = "vsock")]
+use vsock::VsockListener;
 
 #[derive(Clone)]
 struct EnclaveState {
@@ -47,25 +49,59 @@ async fn main() -> anyhow::Result<()> {
         .route("/private-data", get(get_private))
         .with_state(state);
 
-    let addr = "0.0.0.0:5005";
-
     let use_tls = std::env::var("USE_TLS").unwrap_or_else(|_| "true".into()) == "true";
 
-    if use_tls {
-        println!("Starting enclave with TLS on {}", addr);
-        let tls_config = load_tls_config().await?;
-        axum_server::bind_rustls(addr.parse()?, tls_config)
-            .serve(app.into_make_service())
-            .await?;
-    } else {
-        println!(
-            "Starting enclave without TLS on {} (WARNING: unencrypted)",
-            addr
-        );
-        axum::serve(TcpListener::bind(&addr).await?, app.into_make_service()).await?;
+    #[cfg(feature = "vsock")]
+    {
+        let port: u32 = std::env::var("ENCLAVE_PORT")
+            .unwrap_or_else(|_| "5005".into())
+            .parse()?;
+        let listener = VsockListener::bind(vsock::VMADDR_CID_ANY, port)?;
+        println!("Starting enclave on vsock port {}", port);
+
+        loop {
+            let (stream, _) = listener.accept()?;
+            let app = app.clone();
+            let tls_config = if use_tls {
+                Some(load_tls_config().await?)
+            } else {
+                None
+            };
+
+            tokio::spawn(async move {
+                let stream = tokio::net::TcpStream::from_std(stream.into()).unwrap();
+                if let Some(config) = tls_config {
+                    let acceptor = config.get_inner().clone();
+                    let _ = axum_server::tls_rustls::bind_rustls(stream, acceptor)
+                        .serve(app.into_make_service())
+                        .await;
+                } else {
+                    let _ = axum::serve(tokio::net::TcpListener::from_std(stream.into_std().unwrap()).unwrap(), app.into_make_service()).await;
+                }
+            });
+        }
     }
 
-    Ok(())
+    #[cfg(not(feature = "vsock"))]
+    {
+        let addr = "0.0.0.0:5005";
+
+        if use_tls {
+            println!("Starting enclave with TLS on {}", addr);
+            let tls_config = load_tls_config().await?;
+            axum_server::bind_rustls(addr.parse()?, tls_config)
+                .serve(app.into_make_service())
+                .await?;
+        } else {
+            println!(
+                "Starting enclave without TLS on {} (WARNING: unencrypted)",
+                addr
+            );
+            axum::serve(TcpListener::bind(&addr).await?, app.into_make_service()).await?;
+        }
+
+        Ok(())
+    }
 }
 async fn post_private(State(_st): State<EnclaveState>, _body: Bytes) -> (StatusCode, String) {
     (StatusCode::CREATED, "stored".into())
