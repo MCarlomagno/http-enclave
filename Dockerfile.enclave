@@ -1,0 +1,29 @@
+# Build stage
+FROM rust:1.88-slim as builder
+
+WORKDIR /build
+
+# Copy the workspace
+COPY Cargo.toml Cargo.lock ./
+COPY crates/enclave ./crates/enclave
+
+# Build with vsock feature for production
+RUN cargo build --release -p enclave --features vsock
+
+# Runtime stage - minimal image
+FROM debian:bookworm-slim
+
+# Install runtime dependencies
+RUN apt-get update && \
+    apt-get install -y ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy binary from builder
+COPY --from=builder /build/target/release/enclave /usr/local/bin/enclave
+
+# Default environment variables
+ENV USE_TLS=true
+ENV ENCLAVE_PORT=5005
+
+# Run the enclave binary
+CMD ["/usr/local/bin/enclave"]

@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  # Enclave - listens on vsock port 5005
+  enclave:
+    build:
+      context: .
+      dockerfile: Dockerfile.enclave
+    privileged: true
+    devices:
+      - /dev/vsock:/dev/vsock
+    environment:
+      - USE_TLS=true
+      - ENCLAVE_PORT=5005
+      - TLS_CERT_PATH=/certs/cert.pem
+      - TLS_KEY_PATH=/certs/key.pem
+      - ENCLAVE_KEY_BASE64=${ENCLAVE_KEY_BASE64:-cg5DpFeQeQUpNyEuasPiFVO7eeeO9Xua4/TJjiNtJBg=}
+    volumes:
+      - ./cert.pem:/certs/cert.pem:ro
+      - ./key.pem:/certs/key.pem:ro
+    networks:
+      - enclave-net
+
+  # Host proxy - connects to enclave via vsock
+  # Note: This may not work in Docker since vsock connections between
+  # containers require special networking setup. For real testing, use AWS Nitro.
+  host:
+    build:
+      context: .
+      dockerfile: Dockerfile.host
+    privileged: true
+    devices:
+      - /dev/vsock:/dev/vsock
+    ports:
+      - "443:443"
+    environment:
+      - BIND_ADDR=0.0.0.0:443
+      # In Docker, both containers share the same vsock namespace
+      # so we use CID 2 (local) to connect
+      - ENCLAVE_CID=2
+      - ENCLAVE_PORT=5005
+    depends_on:
+      - enclave
+    networks:
+      - enclave-net
+
+networks:
+  enclave-net:
+    driver: bridge

@@ -71,37 +71,40 @@ Test:
 curl -k -XPOST https://localhost:443/private-data -d '{"hello":"world"}' -H 'content-type: application/json'
 curl -k https://localhost:443/private-data
 ```
-
-## Production deployment
-
-Build with vsock support:
-```bash
-cargo build -p enclave --features vsock --release
-cargo build -p host --features vsock --release
-```
-
-Enclave configuration:
-- Set ENCLAVE_PORT (e.g., 5005)
-- Load TLS certificate and key securely
-- Use KMS with attestation for ENCLAVE_KEY_BASE64
-
-Host configuration:
-- Set ENCLAVE_CID (e.g., 16)
-- Set ENCLAVE_PORT
-- Run on EC2 parent instance
-
-## Configuration
+### Configuration
 
 Enclave environment variables:
-- USE_TLS: Enable TLS (default: true)
-- TLS_CERT_PATH: Certificate file path (default: cert.pem)
-- TLS_KEY_PATH: Private key file path (default: key.pem)
-- ENCLAVE_KEY_BASE64: Base64-encoded 32-byte AES key
+- USE_TLS - default: true
+- TLS_CERT_PATH - default: cert.pem
+- TLS_KEY_PATH - default: key.pem
 
 Host environment variables:
-- BIND_ADDR: Listen address (default: 0.0.0.0:443)
-- ENCLAVE_CID: VSOCK CID for production
-- ENCLAVE_PORT: Enclave port
+- BIND_ADDR - default: 0.0.0.0:443
+- ENCLAVE_CID - default: 16
+- ENCLAVE_PORT - default: 5005
+
+
+## Testing vsock builds locally (Linux only)
+
+**Note**: vsock requires `/dev/vsock` which is only available on Linux with vsock kernel module. On macOS/Windows, you cannot test actual vsock locally.
+
+If you have a Linux machine with vsock support:
+
+```bash
+# Check if vsock is available
+ls -l /dev/vsock
+
+# Build with vsock feature
+cargo build -p enclave --features vsock
+cargo build -p host --features vsock
+
+# Run enclave (listens on vsock port 5005)
+ENCLAVE_PORT=5005 ./target/debug/enclave
+
+# Run host in another terminal (connects via vsock CID 2 - local)
+ENCLAVE_CID=2 ENCLAVE_PORT=5005 ./target/debug/host
+```
+
 
 ## Endpoints
 
