@@ -5,29 +5,21 @@ services:
   enclave:
     build:
       context: .
-      dockerfile: Dockerfile.enclave
+      dockerfile: Dockerfile.enclave.vsock
     privileged: true
     devices:
       - /dev/vsock:/dev/vsock
     environment:
       - USE_TLS=true
       - ENCLAVE_PORT=5005
-      - TLS_CERT_PATH=/certs/cert.pem
-      - TLS_KEY_PATH=/certs/key.pem
-      - ENCLAVE_KEY_BASE64=${ENCLAVE_KEY_BASE64:-cg5DpFeQeQUpNyEuasPiFVO7eeeO9Xua4/TJjiNtJBg=}
-    volumes:
-      - ./cert.pem:/certs/cert.pem:ro
-      - ./key.pem:/certs/key.pem:ro
     networks:
       - enclave-net
 
   # Host proxy - connects to enclave via vsock
-  # Note: This may not work in Docker since vsock connections between
-  # containers require special networking setup. For real testing, use AWS Nitro.
   host:
     build:
       context: .
-      dockerfile: Dockerfile.host
+      dockerfile: Dockerfile.host.vsock
     privileged: true
     devices:
       - /dev/vsock:/dev/vsock

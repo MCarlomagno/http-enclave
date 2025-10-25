@@ -1,75 +1,62 @@
-.PHONY: help build-enclave build-host build-eif run-enclave stop-enclave describe-enclave console clean
+.PHONY: help build-local run-local test-tcp test-vsock build-tcp build-vsock clean
 
 help:
-	@echo "AWS Nitro Enclave Deployment Commands"
+	@echo "HTTP Enclave Testing Commands"
 	@echo ""
 	@echo "Local Development:"
-	@echo "  make build-local         Build both host and enclave for local dev (no vsock)"
-	@echo "  make run-local           Run locally with cargo"
+	@echo "  make build-local         Build both host and enclave for local dev (TCP mode)"
+	@echo "  make run-local           Run locally with cargo (TCP mode)"
 	@echo ""
-	@echo "Production (AWS Nitro):"
-	@echo "  make build-enclave       Build enclave Docker image"
-	@echo "  make build-host          Build host Docker image"
-	@echo "  make build-eif           Convert enclave Docker image to EIF file"
-	@echo "  make run-enclave         Launch the enclave on EC2"
-	@echo "  make describe-enclave    Show running enclave status"
-	@echo "  make console             Attach to enclave console"
-	@echo "  make stop-enclave        Terminate the enclave"
+	@echo "Docker Testing:"
+	@echo "  make test-tcp            Test with Docker using TCP communication"
+	@echo "  make test-vsock          Test with Docker using vsock communication (Linux only)"
+	@echo "  make build-tcp           Build Docker images for TCP testing"
+	@echo "  make build-vsock         Build Docker images for vsock testing"
+	@echo ""
+	@echo "Direct Testing (Linux with vsock):"
+	@echo "  make run-local-vsock     Run locally with vsock (Linux only)"
 	@echo ""
 	@echo "Cleanup:"
-	@echo "  make clean               Remove build artifacts"
+	@echo "  make clean               Remove build artifacts and Docker images"
 
-# Local development (no vsock)
+# Local development (TCP mode)
 build-local:
-	cargo build -p enclave
-	cargo build -p host
+	cargo build -p enclave --features tcp
+	cargo build -p host --features tcp
 
 run-local:
 	@echo "Run in separate terminals:"
-	@echo "  Terminal 1: cargo run --bin enclave"
-	@echo "  Terminal 2: cargo run --bin host"
+	@echo "  Terminal 1: cargo run --bin enclave --features tcp"
+	@echo "  Terminal 2: cargo run --bin host --features tcp"
 
-# Production builds
-build-enclave:
-	docker build -f Dockerfile.enclave -t enclave:latest .
+# Local development (vsock mode - Linux only)
+build-local-vsock:
+	cargo build -p enclave --features vsock
+	cargo build -p host --features vsock
 
-build-host:
-	docker build -f Dockerfile.host -t host:latest .
+run-local-vsock:
+	@echo "Run in separate terminals (Linux with vsock support):"
+	@echo "  Terminal 1: ENCLAVE_PORT=5005 cargo run --bin enclave --features vsock"
+	@echo "  Terminal 2: BIND_ADDR=0.0.0.0:443 ENCLAVE_CID=2 ENCLAVE_PORT=5005 cargo run --bin host --features vsock"
 
-build-eif: build-enclave
-	nitro-cli build-enclave \
-		--docker-uri enclave:latest \
-		--output-file enclave.eif
+# Docker TCP testing
+build-tcp:
+	docker build -f Dockerfile.enclave.tcp -t enclave-tcp .
+	docker build -f Dockerfile.host.tcp -t host-tcp .
 
-# Enclave operations (run on EC2 parent instance)
-run-enclave:
-	nitro-cli run-enclave \
-		--cpu-count 2 \
-		--memory 512 \
-		--enclave-cid 16 \
-		--eif-path enclave.eif \
-		--debug-mode
+test-tcp: build-tcp
+	docker compose -f docker-compose.tcp.yml up --build
 
-describe-enclave:
-	nitro-cli describe-enclaves
+# Docker vsock testing (Linux only)
+build-vsock:
+	docker build -f Dockerfile.enclave.vsock -t enclave-vsock .
+	docker build -f Dockerfile.host.vsock -t host-vsock .
 
-console:
-	@ENCLAVE_ID=$$(nitro-cli describe-enclaves | grep -oP '"EnclaveID": "\K[^"]+' | head -1); \
-	if [ -z "$$ENCLAVE_ID" ]; then \
-		echo "No running enclave found"; \
-	else \
-		nitro-cli console --enclave-id $$ENCLAVE_ID; \
-	fi
-
-stop-enclave:
-	@ENCLAVE_ID=$$(nitro-cli describe-enclaves | grep -oP '"EnclaveID": "\K[^"]+' | head -1); \
-	if [ -z "$$ENCLAVE_ID" ]; then \
-		echo "No running enclave found"; \
-	else \
-		nitro-cli terminate-enclave --enclave-id $$ENCLAVE_ID; \
-	fi
+test-vsock: build-vsock
+	docker compose -f docker-compose.vsock.yml up --build
 
 clean:
 	cargo clean
-	rm -f enclave.eif
-	docker rmi enclave:latest host:latest 2>/dev/null || true
+	docker compose -f docker-compose.tcp.yml down 2>/dev/null || true
+	docker compose -f docker-compose.vsock.yml down 2>/dev/null || true
+	docker rmi enclave-tcp host-tcp enclave-vsock host-vsock 2>/dev/null || true

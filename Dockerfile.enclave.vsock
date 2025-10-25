@@ -7,8 +7,8 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ ./crates/
 
-# Build without vsock feature for TCP testing
-RUN cargo build --release -p enclave
+# Build with vsock feature
+RUN cargo build --release -p enclave --features vsock
 
 # Runtime stage - minimal image
 FROM debian:bookworm-slim

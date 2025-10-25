@@ -5,7 +5,7 @@ services:
   enclave:
     build:
       context: .
-      dockerfile: Dockerfile.enclave
+      dockerfile: Dockerfile.enclave.tcp
     environment:
       - USE_TLS=true
     ports:
@@ -17,7 +17,7 @@ services:
   host:
     build:
       context: .
-      dockerfile: Dockerfile.host
+      dockerfile: Dockerfile.host.tcp
     environment:
       - BIND_ADDR=0.0.0.0:443
       - ENCLAVE_ADDR=enclave:8443
