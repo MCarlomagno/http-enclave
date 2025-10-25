@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  # Enclave - TLS termination happens here
+  enclave:
+    build:
+      context: .
+      dockerfile: Dockerfile.enclave
+    environment:
+      - USE_TLS=true
+    ports:
+      - "8443:8443"  # Optional: expose for direct debugging
+    networks:
+      - enc-net
+
+  # Host proxy - forwards encrypted traffic to enclave
+  host:
+    build:
+      context: .
+      dockerfile: Dockerfile.host
+    environment:
+      - BIND_ADDR=0.0.0.0:443
+      - ENCLAVE_ADDR=enclave:8443
+    ports:
+      - "443:443"
+    depends_on:
+      - enclave
+    networks:
+      - enc-net
+
+networks:
+  enc-net:
+    driver: bridge

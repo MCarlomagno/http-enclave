@@ -5,10 +5,10 @@ WORKDIR /build
 
 # Copy the workspace
 COPY Cargo.toml Cargo.lock ./
-COPY crates/host ./crates/host
+COPY crates/ ./crates/
 
-# Build with vsock feature for production
-RUN cargo build --release -p host --features vsock
+# Build without vsock feature for TCP testing
+RUN cargo build --release -p host
 
 # Runtime stage - minimal image
 FROM debian:bookworm-slim

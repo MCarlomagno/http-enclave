@@ -19,6 +19,7 @@ async fn main() -> anyhow::Result<()> {
 
     loop {
         let (mut client, _) = ln.accept().await?;
+        println!("[HOST] New client connection accepted");
         tokio::spawn(async move {
             #[cfg(feature = "vsock")]
             {
@@ -27,8 +28,12 @@ async fn main() -> anyhow::Result<()> {
             }
             #[cfg(not(feature = "vsock"))]
             {
-                let mut enclave = TcpStream::connect("127.0.0.1:5005").await.unwrap();
+                let addr = std::env::var("ENCLAVE_ADDR").unwrap_or_else(|_| "127.0.0.1:8443".into());
+                println!("[HOST] Connecting to enclave at: {}", addr);
+                let mut enclave = TcpStream::connect(addr).await.unwrap();
+                println!("[HOST] Connected to enclave, forwarding encrypted traffic...");
                 let _ = io::copy_bidirectional(&mut client, &mut enclave).await;
+                println!("[HOST] Connection closed");
             }
         });
     }

@@ -5,10 +5,10 @@ WORKDIR /build
 
 # Copy the workspace
 COPY Cargo.toml Cargo.lock ./
-COPY crates/enclave ./crates/enclave
+COPY crates/ ./crates/
 
-# Build with vsock feature for production
-RUN cargo build --release -p enclave --features vsock
+# Build without vsock feature for TCP testing
+RUN cargo build --release -p enclave
 
 # Runtime stage - minimal image
 FROM debian:bookworm-slim
