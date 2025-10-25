@@ -4,7 +4,7 @@ use tokio::{
 };
 
 #[cfg(feature = "vsock")]
-use vsock::VsockStream;
+use tokio_vsock::{VsockAddr, VsockStream};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -24,7 +24,8 @@ async fn main() -> anyhow::Result<()> {
         tokio::spawn(async move {
             #[cfg(feature = "vsock")]
             {
-                let mut enclave = VsockStream::connect((enclave_cid, enclave_port)).unwrap();
+                let addr = VsockAddr::new(enclave_cid, enclave_port);
+                let mut enclave = VsockStream::connect(addr).await.unwrap();
                 let _ = io::copy_bidirectional(&mut client, &mut enclave).await;
             }
             #[cfg(not(feature = "vsock"))]
