@@ -1,120 +1,71 @@
 # HTTP Enclave
 
-End to end encrypted communication between clients and an isolated enclave. The infrastructure operator cannot read the traffic.
+End-to-end encrypted communication where the host proxy cannot read traffic. TLS termination happens inside the enclave.
 
-## How it works
+## What is this?
 
-### Components
+- **Host Proxy**: Forwards encrypted traffic to enclave (cannot decrypt)
+- **Enclave**: HTTP server with TLS termination and encryption keys
+- **Security**: Infrastructure operator cannot access decrypted data
 
-Host proxy (crates/host):
-- Listens for TCP connections on port 443
-- Forwards all traffic to the enclave
-- Cannot decrypt TLS (no access to private keys)
+## Build & Test
 
-Enclave (crates/enclave):
-- HTTP API server with TLS termination
-- Holds encryption keys in memory
-- Processes sensitive operations
-
-### Traffic flow
-
-```
-Client -> HTTPS -> Host Proxy (encrypted passthrough) -> Enclave (TLS termination)
-```
-
-The host proxy only sees encrypted bytes. TLS termination happens inside the enclave.
-
-### Security
-
-What the operator cannot access:
-- TLS private key
-- Encryption keys
-- HTTP request/response content
-- Decrypted data
-
-What the operator can access:
-- Encrypted traffic patterns
-- Connection metadata
-- Ciphertext at rest
-
-## Local setup
-
-Generate enclave key:
+### Any Platform (TCP)
 ```bash
-export ENCLAVE_KEY_BASE64=$(openssl rand -base64 32)
+# Docker testing
+make test-tcp
+
+# Local testing
+make build-local
+make run-local
 ```
 
-Generate TLS certificate:
+### Linux with vsock
 ```bash
-openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -nodes -subj "/CN=localhost"
+# Docker testing
+make test-vsock
+
+# Local testing  
+make build-local-vsock
+make run-local-vsock
 ```
 
-Setup environment variables:
-
-Copy the contents of env.example into .env and update the values.
-```bash
-cp env.example .env
-```
-
-Run enclave:
-```bash
-cargo run --bin enclave
-```
-
-Run host proxy:
-```bash
-cargo run --bin host
-```
-
-Test:
-```bash
-curl -k -XPOST https://localhost:443/private-data -d '{"hello":"world"}' -H 'content-type: application/json'
-curl -k https://localhost:443/private-data
-```
-### Configuration
-
-Enclave environment variables:
-- USE_TLS - default: true
-- TLS_CERT_PATH - default: cert.pem
-- TLS_KEY_PATH - default: key.pem
-
-Host environment variables:
-- BIND_ADDR - default: 0.0.0.0:443
-- ENCLAVE_CID - default: 16
-- ENCLAVE_PORT - default: 5005
-
-
-## Testing vsock builds locally (Linux only)
-
-**Note**: vsock requires `/dev/vsock` which is only available on Linux with vsock kernel module. On macOS/Windows, you cannot test actual vsock locally.
-
-If you have a Linux machine with vsock support:
+## Test the System
 
 ```bash
-# Check if vsock is available
-ls -l /dev/vsock
+# Send encrypted data
+curl -k -X POST https://localhost/private-data \
+  -d '{"secret":"my-data"}' \
+  -H 'content-type: application/json'
 
-# Build with vsock feature
-cargo build -p enclave --features vsock
-cargo build -p host --features vsock
-
-# Run enclave (listens on vsock port 5005)
-ENCLAVE_PORT=5005 ./target/debug/enclave
-
-# Run host in another terminal (connects via vsock CID 2 - local)
-ENCLAVE_CID=2 ENCLAVE_PORT=5005 ./target/debug/host
+# Response: {"request_id":"...","status":"stored"}
 ```
 
+## Configuration
 
-## Endpoints
+### Environment Variables
 
-POST /private-data: Store encrypted data
-GET /private-data: Retrieve decrypted data
+**Enclave:**
+- `USE_TLS=true` - Enable TLS
+- `ENCLAVE_PORT=8443` - TCP port (or 5005 for vsock)
+- `ENCLAVE_KEY_BASE64=...` - Encryption key
 
-## Limitations
+**Host:**
+- `BIND_ADDR=0.0.0.0:443` - Listen address
+- `ENCLAVE_ADDR=enclave:8443` - Enclave address (TCP)
+- `ENCLAVE_CID=2` - Enclave CID (vsock)
 
-- Encryption/decryption endpoints are skeleton implementations
-- Keys loaded from environment (development only)
-- No KMS integration
-- No attestation verification
-- Operator can observe traffic patterns and sizes
+### Feature Flags
+
+- `tcp` (default) - Use TCP communication
+- `vsock` - Use vsock communication (Linux only)
+
+## Commands
+
+```bash
+make help              # Show all commands
+make test-tcp          # Test with Docker (TCP)
+make test-vsock        # Test with Docker (vsock)
+make build-local       # Build for local development
+make clean             # Clean build artifacts
+```

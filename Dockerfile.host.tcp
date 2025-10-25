@@ -7,8 +7,8 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ ./crates/
 
-# Build without vsock feature for TCP testing
-RUN cargo build --release -p host
+# Build with TCP feature (default)
+RUN cargo build --release -p host --features tcp
 
 # Runtime stage - minimal image
 FROM debian:bookworm-slim
@@ -18,8 +18,7 @@ COPY --from=builder /build/target/release/host /usr/local/bin/host
 
 # Default environment variables
 ENV BIND_ADDR=0.0.0.0:443
-ENV ENCLAVE_CID=16
-ENV ENCLAVE_PORT=5005
+ENV ENCLAVE_ADDR=enclave:8443
 
 # Run the host proxy
 CMD ["/usr/local/bin/host"]

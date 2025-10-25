@@ -1,0 +1,25 @@
+# Build stage
+FROM rust:1.88-slim as builder
+
+WORKDIR /build
+
+# Copy the workspace
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ ./crates/
+
+# Build with vsock feature
+RUN cargo build --release -p host --features vsock
+
+# Runtime stage - minimal image
+FROM debian:bookworm-slim
+
+# Copy binary from builder
+COPY --from=builder /build/target/release/host /usr/local/bin/host
+
+# Default environment variables
+ENV BIND_ADDR=0.0.0.0:443
+ENV ENCLAVE_CID=16
+ENV ENCLAVE_PORT=5005
+
+# Run the host proxy
+CMD ["/usr/local/bin/host"]

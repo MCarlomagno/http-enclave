@@ -6,7 +6,7 @@ use chacha20poly1305::{aead::{Aead, KeyInit}, AeadCore, XChaCha20Poly1305};
 use rand_core::OsRng;
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct StoreMsg {
     request_id: String,
     content_type: String,
@@ -70,12 +70,22 @@ const HOST_CID: u32 = 3;
 const HOST_STORE_PORT: u32 = 7001;
 
 async fn send_to_host(msg: &StoreMsg) -> Result<()> {
-    use tokio::io::AsyncWriteExt;
-    use tokio_vsock::VsockStream;
+    #[cfg(feature = "vsock")]
+    {
+        use tokio::io::AsyncWriteExt;
+        use tokio_vsock::VsockStream;
 
-    let mut s = VsockStream::connect(tokio_vsock::VsockAddr::new(HOST_CID, HOST_STORE_PORT)).await?;
-    let bytes = serde_json::to_vec(msg)?;
-    s.write_all(&bytes).await?;
+        let mut s = VsockStream::connect(tokio_vsock::VsockAddr::new(HOST_CID, HOST_STORE_PORT)).await?;
+        let bytes = serde_json::to_vec(msg)?;
+        s.write_all(&bytes).await?;
+    }
+    
+    #[cfg(feature = "tcp")]
+    {
+        // For TCP mode, we'll just log that we would send to host
+        println!("[ENCLAVE] Would send to host over TCP: {:?}", msg);
+    }
+    
     Ok(())
 }
 
