@@ -1,111 +1,95 @@
-use aes_gcm::{Aes256Gcm, KeyInit};
-use axum::{
-    body::Bytes,
-    extract::State,
-    http::StatusCode,
-    routing::{get, post},
-    Router,
-};
-use base64::prelude::*;
-use tokio::net::TcpListener;
-#[cfg(feature = "vsock")]
-use vsock::VsockListener;
+use anyhow::Result;
+use axum::{routing::post, body::Bytes, http::StatusCode, Json, Router};
+use axum_server::tls_rustls::RustlsConfig;
+use base64::Engine;
+use chacha20poly1305::{aead::{Aead, KeyInit}, AeadCore, XChaCha20Poly1305};
+use rand_core::OsRng;
+use serde::Serialize;
 
-#[derive(Clone)]
-struct EnclaveState {
-    _cipher: Aes256Gcm,
-}
-
-fn load_enclave_state(enclave_key_base64: &str) -> anyhow::Result<EnclaveState> {
-    let key_bytes = base64::prelude::BASE64_STANDARD.decode(enclave_key_base64)?;
-    if key_bytes.len() != 32 {
-        anyhow::bail!(
-            "ENCLAVE_KEY_BASE64 must decode to exactly 32 bytes, got {}",
-            key_bytes.len()
-        );
-    }
-    Ok(EnclaveState {
-        _cipher: Aes256Gcm::new(key_bytes.as_slice().into()),
-    })
-}
-
-async fn load_tls_config() -> anyhow::Result<axum_server::tls_rustls::RustlsConfig> {
-    // Load TLS certificate and key from files or environment
-    let cert_path = std::env::var("TLS_CERT_PATH").unwrap_or_else(|_| "../cert.pem".into());
-    let key_path = std::env::var("TLS_KEY_PATH").unwrap_or_else(|_| "../key.pem".into());
-
-    let config =
-        axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert_path, &key_path).await?;
-
-    Ok(config)
+#[derive(Serialize)]
+struct StoreMsg {
+    request_id: String,
+    content_type: String,
+    nonce_b64: String,
+    ciphertext_b64: String,
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let enclave_key_base64 = "cg5DpFeQeQUpNyEuasPiFVO7eeeO9Xua4/TJjiNtJBg=";
-    let state = load_enclave_state(&enclave_key_base64)?; // holds AES/KMS client, etc.
-    let app = Router::new()
-        .route("/private-data", post(post_private))
-        .route("/private-data", get(get_private))
-        .with_state(state);
+async fn main() -> Result<()> {
+    // Generate a self-signed cert at boot (key never leaves enclave).
+    // In prod, swap to NGINX + ACM for Enclaves.
+    let (cert_pem, key_pem) = self_signed_cert_pem()?;
+    let tls = RustlsConfig::from_pem(cert_pem.into_bytes(), key_pem.into_bytes()).await?;
 
-    let use_tls = std::env::var("USE_TLS").unwrap_or_else(|_| "true".into()) == "true";
+    // One simple endpoint
+    let app = Router::new().route("/private-data", post(private_data));
 
-    #[cfg(feature = "vsock")]
-    {
-        let port: u32 = std::env::var("ENCLAVE_PORT")
-            .unwrap_or_else(|_| "5005".into())
-            .parse()?;
-        let listener = VsockListener::bind(vsock::VMADDR_CID_ANY, port)?;
-        println!("Starting enclave on vsock port {}", port);
+    // Listen on 0.0.0.0:8443 (host proxy will bridge host:443 → enclave:8443)
+    println!("[ENCLAVE] Starting TLS server on 0.0.0.0:8443");
+    axum_server::bind_rustls(([0, 0, 0, 0], 8443).into(), tls)
+        .serve(app.into_make_service())
+        .await?;
+    Ok(())
+}
 
-        loop {
-            let (stream, _) = listener.accept()?;
-            let app = app.clone();
-            let tls_config = if use_tls {
-                Some(load_tls_config().await?)
-            } else {
-                None
-            };
+async fn private_data(body: Bytes) -> Result<Json<serde_json::Value>, StatusCode> {
+    println!("[ENCLAVE] Received private data request");
+    println!("[ENCLAVE] Request body (decrypted): {}", String::from_utf8_lossy(&body));
+    
+    // Encrypt inside the enclave
+    let key = XChaCha20Poly1305::generate_key(&mut OsRng);
+    let cipher = XChaCha20Poly1305::new(&key);
+    let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+    let ct = cipher.encrypt(&nonce, body.as_ref()).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    
+    println!("[ENCLAVE] Data encrypted with key length: {} bytes", key.len());
 
-            tokio::spawn(async move {
-                let stream = tokio::net::TcpStream::from_std(stream.into()).unwrap();
-                if let Some(config) = tls_config {
-                    let acceptor = config.get_inner().clone();
-                    let _ = axum_server::tls_rustls::bind_rustls(stream, acceptor)
-                        .serve(app.into_make_service())
-                        .await;
-                } else {
-                    let _ = axum::serve(tokio::net::TcpListener::from_std(stream.into_std().unwrap()).unwrap(), app.into_make_service()).await;
-                }
-            });
-        }
+    let request_id = uuid_like();
+    let msg = StoreMsg {
+        request_id: request_id.clone(),
+        content_type: "application/octet-stream".into(),
+        nonce_b64: base64::engine::general_purpose::STANDARD.encode(nonce),
+        ciphertext_b64: base64::engine::general_purpose::STANDARD.encode(ct),
+    };
+
+    // Fire-and-forget to host storage over vsock (parent CID=3)
+    if let Err(e) = send_to_host(&msg).await {
+        eprintln!("send_to_host error: {e:?}");
+        // you can decide to fail the request or keep going
     }
 
-    #[cfg(not(feature = "vsock"))]
-    {
-        let addr = "0.0.0.0:5005";
-
-        if use_tls {
-            println!("Starting enclave with TLS on {}", addr);
-            let tls_config = load_tls_config().await?;
-            axum_server::bind_rustls(addr.parse()?, tls_config)
-                .serve(app.into_make_service())
-                .await?;
-        } else {
-            println!(
-                "Starting enclave without TLS on {} (WARNING: unencrypted)",
-                addr
-            );
-            axum::serve(TcpListener::bind(&addr).await?, app.into_make_service()).await?;
-        }
-
-        Ok(())
-    }
+    Ok(Json(serde_json::json!({
+        "request_id": request_id,
+        "status": "stored"
+    })))
 }
-async fn post_private(State(_st): State<EnclaveState>, _body: Bytes) -> (StatusCode, String) {
-    (StatusCode::CREATED, "stored".into())
+
+// ---- enclave → host storage over vsock (parent CID is always 3) ----
+
+const HOST_CID: u32 = 3;
+const HOST_STORE_PORT: u32 = 7001;
+
+async fn send_to_host(msg: &StoreMsg) -> Result<()> {
+    use tokio::io::AsyncWriteExt;
+    use tokio_vsock::VsockStream;
+
+    let mut s = VsockStream::connect(tokio_vsock::VsockAddr::new(HOST_CID, HOST_STORE_PORT)).await?;
+    let bytes = serde_json::to_vec(msg)?;
+    s.write_all(&bytes).await?;
+    Ok(())
 }
-async fn get_private(State(_st): State<EnclaveState>) -> (StatusCode, Vec<u8>) {
-    (StatusCode::OK, b"plaintext".to_vec())
+
+// ---- util: self-signed cert at boot (demo only) ----
+fn self_signed_cert_pem() -> Result<(String, String)> {
+    let cert = rcgen::generate_simple_self_signed(vec!["enclave.local".into()])?;
+    let cert_pem = cert.cert.pem();
+    let key_pem = cert.signing_key.serialize_pem();
+    Ok((cert_pem, key_pem))
+}
+
+// simple unique id; replace with real UUID if desired
+fn uuid_like() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    format!("{t:x}")
 }
